@@ -13,6 +13,9 @@ interface BackupDestination {
     /** @throws IOException when the target cannot be created. */
     fun open(batchId: Long, fileName: String): Target
 
+    /** Removes what an interrupted item left behind: its partial file and, if it got that far, the final file. */
+    fun discard(batchId: Long, fileName: String)
+
     interface Target {
         val output: OutputStream
 
@@ -52,8 +55,7 @@ class StagingDestination(private val root: File) : BackupDestination {
         }
     }
 
-    /** Removes what an interrupted item left behind: its partial file and, if it got that far, the final file. */
-    fun discard(batchId: Long, fileName: String) {
+    override fun discard(batchId: Long, fileName: String) {
         File(batchDir(batchId), fileName + PART_SUFFIX).delete()
         File(batchDir(batchId), fileName).delete()
     }

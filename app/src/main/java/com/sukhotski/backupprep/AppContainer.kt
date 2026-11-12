@@ -36,7 +36,7 @@ class AppContainer(app: Application) {
     )
 
     private companion object {
-        /** Last line of defence: a bug in background work must not crash the app. No file names reach the log. */
-        val logUnhandled = CoroutineExceptionHandler { _, e -> Log.e("BackupApp", "Background work failed", e) }
+        /** Last line of defence: a bug in background work must not crash the app. Only the exception type is logged, its message may contain a path. */
+        val logUnhandled = CoroutineExceptionHandler { _, e -> Log.e("BackupApp", "Background work failed: ${e::class.java.simpleName}") }
     }
 }

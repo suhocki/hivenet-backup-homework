@@ -34,7 +34,15 @@ interface DocumentSource {
 
 class ContentResolverDocumentSource(private val resolver: ContentResolver) : DocumentSource {
 
-    override fun describe(uri: String): SourceInfo {
+    override fun describe(uri: String): SourceInfo =
+        try {
+            describeOrThrow(uri)
+        } catch (e: Exception) {
+            // A broken provider cursor must fail one row later, not drop the whole selection.
+            SourceInfo(null, null, false)
+        }
+
+    private fun describeOrThrow(uri: String): SourceInfo {
         val parsed = Uri.parse(uri)
         val cursor = query(parsed, WITH_FLAGS) ?: query(parsed, OPENABLE_ONLY) ?: return SourceInfo(null, null, false)
         cursor.use {
@@ -42,7 +50,7 @@ class ContentResolverDocumentSource(private val resolver: ContentResolver) : Doc
             val flags = it.optInt(DocumentsContract.Document.COLUMN_FLAGS) ?: 0
             return SourceInfo(
                 displayName = it.optString(OpenableColumns.DISPLAY_NAME),
-                size = it.optLong(OpenableColumns.SIZE),
+                size = it.optLong(OpenableColumns.SIZE)?.takeIf { size -> size >= 0 },
                 isVirtual = flags and DocumentsContract.Document.FLAG_VIRTUAL_DOCUMENT != 0,
             )
         }

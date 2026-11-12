@@ -35,8 +35,8 @@ class BackupServiceTest {
     private fun kotlinx.coroutines.test.TestScope.service(
         docs: Map<String, FakeDocument>,
         store: BackupStore = this@BackupServiceTest.store,
+        source: FakeDocumentSource = FakeDocumentSource(docs),
     ): BackupService {
-        val source = FakeDocumentSource(docs)
         val dispatcher = StandardTestDispatcher(testScheduler)
         return BackupService(store, source, FileCopier(source, destination), destination, backgroundScope, dispatcher)
     }
@@ -210,5 +210,29 @@ class BackupServiceTest {
 
         assertEquals(BatchStatus.FINISHED, store.batches.single().batch.status)
         assertEquals(ItemStatus.FAILED, store.batches.single().items.single().status)
+    }
+
+    @Test
+    fun `uri grants are taken before the batch and given back after it`() = runTest {
+        val source = FakeDocumentSource(mapOf("u1" to FakeDocument("one".toByteArray(), name = "one.txt")))
+        val service = service(emptyMap(), source = source)
+
+        service.start(listOf("u1", "u1")).join()
+
+        assertEquals(listOf("u1"), source.retained)
+        assertEquals(listOf("u1"), source.released)
+    }
+
+    @Test
+    fun `startup gives back the uri grants of items interrupted by a kill`() = runTest {
+        store.seed(
+            BatchEntity(id = 7, createdAt = 0, status = BatchStatus.RUNNING),
+            listOf(ItemEntity(id = 1, batchId = 7, sourceUri = "lost", name = "x", expectedSize = 1, status = ItemStatus.PENDING)),
+        )
+        val source = FakeDocumentSource(emptyMap())
+
+        service(emptyMap(), source = source).reconcile()
+
+        assertEquals(listOf("lost"), source.released)
     }
 }

@@ -32,6 +32,12 @@ class FakeDocument(
 
 class FakeDocumentSource(private val docs: Map<String, FakeDocument>) : DocumentSource {
     val opened = mutableListOf<String>()
+    val retained = mutableListOf<String>()
+    val released = mutableListOf<String>()
+
+    override fun retain(uri: String) { retained += uri }
+
+    override fun release(uri: String) { released += uri }
 
     override fun describe(uri: String): SourceInfo {
         val doc = docs[uri] ?: return SourceInfo(null, null, false)
@@ -58,6 +64,8 @@ class FakeDocumentSource(private val docs: Map<String, FakeDocument>) : Document
 
 /** Destination whose output stream fails with the given exception on the first write. */
 class FailingDestination(private val delegate: BackupDestination, private val error: IOException) : BackupDestination {
+    override fun discard(batchId: Long, fileName: String) = delegate.discard(batchId, fileName)
+
     override fun open(batchId: Long, fileName: String): BackupDestination.Target {
         val target = delegate.open(batchId, fileName)
         return object : BackupDestination.Target by target {

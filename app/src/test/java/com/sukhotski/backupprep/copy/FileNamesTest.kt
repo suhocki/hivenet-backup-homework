@@ -1,6 +1,7 @@
 package com.sukhotski.backupprep.copy
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FileNamesTest {
@@ -30,9 +31,9 @@ class FileNamesTest {
     @Test
     fun `sanitize limits by bytes so long Cyrillic names still fit the file system`() {
         val result = FileNames.sanitize("я".repeat(200) + ".pdf")
-        assert(result.toByteArray().size <= 240)
+        assertTrue(result.toByteArray().size <= 240)
         assertEquals(".pdf", result.takeLast(4))
-        assert((result + " (99).part").toByteArray().size <= 255)
+        assertTrue((result + " (99).part").toByteArray().size <= 255)
     }
 
     @Test

@@ -1,154 +1,106 @@
 # Prepare for Backup
 
-A small Android app that lets a user pick files with the system document picker and
-creates local backup copies of them. The last batch and the result of every file
-survive an app restart.
+A small Android app. The user picks files with the system document picker, and the app
+makes local copies of them. The last batch and the result of every file survive a restart.
+
+## Summary
+
+- **Time spent:** about 4 hours, including setup, tests, emulator checks and this README.
+- **Complete:** everything in the required scope. Not done: the items listed under
+  "Consciously not done".
+- **Tested on:** Android Studio emulator "Medium Phone", Android 16 (API 36, arm64).
+- **AI use:** I used Claude Code throughout. It wrote most of the first draft of every file
+  from the decisions I set: staging copy in app-private storage, the failure categories,
+  the `.part` then rename rule, the naming rules and what to leave out. I then ran separate
+  AI review passes, as a strict reviewer and as a tester on the emulator, read the findings,
+  decided which ones to fix and which to leave, and checked the fixes. Examples of fixes
+  from that review: a temp file clash between `foo.part` and `foo`, an uncaught database
+  error on a full disk, file names too long in bytes for Cyrillic text, and URI grants not
+  given back after a process kill. I have read every line and can explain and change any part.
 
 ## Build and run
 
-Requirements: JDK 17 or newer, Android SDK with platform 36 installed. No global Gradle
-is needed, the wrapper downloads Gradle 9.3.1.
+Requirements: JDK 17 or newer, Android SDK with platform 36. The Gradle wrapper downloads
+Gradle 9.3.1.
 
 ```
 ./gradlew assembleDebug testDebugUnitTest
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Or open the folder in Android Studio and press Run.
+Or open the folder in Android Studio and press Run. minSdk 26, compileSdk and targetSdk 36.
+Stack: Kotlin 2.2, Jetpack Compose (Material 3), Room 2.8 with KSP, coroutines. One module,
+no DI framework.
 
-Tested on the Android Studio emulator "Medium Phone", Android 16 (API 36, arm64).
-minSdk is 26, compileSdk and targetSdk are 36.
+## How it works
 
-Stack: Kotlin 2.2, Jetpack Compose (Material 3), Room 2.8 with KSP, Kotlin coroutines.
-One module, no DI framework.
-
-## What the app does
-
-1. Tap "Select files". The system picker (`ActivityResultContracts.OpenMultipleDocuments`) opens.
-2. Every picked file is copied, one after another, to app-private storage:
+1. "Select files" opens the system picker (`OpenMultipleDocuments`).
+2. Each file is copied, one after another, to app-private storage:
    `filesDir/staging/<batchId>/<name>`.
-3. The screen shows the batch: file name, size, status and a human readable failure reason,
-   plus a summary line like "4 copied, 1 failed".
-4. After the app is closed and reopened, the latest batch is shown again with the recorded outcomes.
+3. The screen shows name, size, status and a plain failure reason per file, and a summary
+   like "4 copied, 1 failed".
+4. After a restart the latest batch is shown again.
 
-## Interpretation
-
-I read "prepare for backup" as the staging step of a backup pipeline. Before anything is
-chunked, encrypted or uploaded, the app takes a stable local snapshot of each selected file.
-After that, the later steps no longer depend on the source still existing, being unchanged, or
-the URI permission still being valid. Encryption, chunking and upload are not implemented.
-They get a seam: `BackupDestination` is the interface a later encrypting or uploading
-destination would implement.
-
-## Architecture
+I read "prepare for backup" as the staging step of a backup pipeline: before anything is
+chunked, encrypted or uploaded, the app takes a stable local snapshot of each file. Then
+later steps do not depend on the source still existing, being unchanged, or the URI grant
+still being valid. That is why copies go to app-private storage and why a partial copy
+must never look like a success.
 
 ```
-ui/      MainActivity, BackupViewModel, BackupScreen      Compose, observes Room
-copy/    BackupService      runs one batch: describe, record, copy each item, record result
-         FileCopier         streams one file, maps every failure to a FailureReason
-         DocumentSource     read side (ContentResolver), interface for tests
-         BackupDestination  write side (.part then rename), interface for tests and future sinks
-         FileNames          sanitize display names, add " (1)" on collisions
-data/    Room: BatchEntity, ItemEntity, BackupDao, BackupStore (interface + Room impl)
-AppContainer                hand wiring, application scoped CoroutineScope
+ui/    MainActivity, BackupViewModel, BackupScreen   Compose, observes Room
+copy/  BackupService      runs batches one after another: describe, record, copy, record
+       FileCopier         streams one file, maps every failure to a FailureReason
+       DocumentSource     read side (ContentResolver)
+       BackupDestination  write side (.part, fsync, rename, discard)
+       FileNames          safe names, " (1)" on collisions
+data/  Room: BatchEntity, ItemEntity, BackupDao, BackupStore
 ```
 
-The copy runs in an application-scoped coroutine, not in the ViewModel. The screen only
-observes the database through a `StateFlow`. Rotation does not touch the running copy.
-Leaving the screen does not either, as long as the provider lets the app keep the URI grant
-(see "URI permissions" below). If it does not, the remaining files fail with "access was lost"
-and can be picked again. Nothing is lost silently.
+The copy runs in an application-scoped coroutine, not in the ViewModel, so rotation does
+not touch it. The screen only observes the database.
 
 ## Decisions
 
-- **Streaming copy** with a 256 KB buffer on `Dispatchers.IO`. Memory stays flat for large files.
-- **Write to `name.part`, fsync, then rename.** A final file name always means a complete copy.
-  The parent directory is not fsynced, so on power loss (not process death) a rename can be lost;
-  the startup cleanup then removes the orphaned `.part`.
-- **Size check.** If the provider reports `OpenableColumns.SIZE`, the copied byte count must
-  match, otherwise the item fails with "size mismatch" and the partial file is deleted.
-  If the size is unknown, the check is skipped.
-- **One failure does not stop the batch.** Each item ends as DONE or FAILED with a reason:
-  source unreadable, permission lost, no space, write failed, size mismatch, virtual document
-  (for example Google Docs, which has no byte stream), unexpected. A failure inside the
-  database itself (for example SQLite on a full disk) marks the batch interrupted instead of
-  crashing the app.
-- **Interrupted work is made visible.** On app start, items still PENDING or COPYING and
-  batches still RUNNING become INTERRUPTED, and their files are deleted, both the `.part` file
-  and a final file that was renamed just before the process died. So a file on disk always
-  means DONE in the database. There is no automatic resume.
-- **Names.** Taken from `OpenableColumns.DISPLAY_NAME`, sanitized (path separators, control
-  characters), with a fallback of "file". Two files with the same name in one batch become
-  `name.ext` and `name (1).ext`. The same URI picked twice is copied once. A name ending in
-  `.part` gets a `_` appended, because `.part` is reserved for temp files.
-- **0-byte files** are a normal success.
+- **Streaming copy** with a 256 KB buffer on `Dispatchers.IO`.
+- **Write `name.part`, fsync, rename.** A final name means a complete copy. The directory is
+  not fsynced, so after a power loss (not a process kill) a rename may be lost. Startup does
+  not check DONE rows against the disk; that is a known gap.
+- **Size check** against `OpenableColumns.SIZE` when the provider reports it. Unknown size
+  means no check. Same-size changes are not detected without a hash.
+- **One failure does not stop the batch.** Reasons: source unreadable, permission lost, no
+  space, write failed, size mismatch, virtual document (for example Google Docs), unexpected.
+  A database failure marks the batch interrupted instead of crashing the app.
+- **Interrupted work is visible.** On start, unfinished items become INTERRUPTED, their
+  `.part` and final files are deleted and their URI grants are given back. A file on disk
+  means DONE in the database. No automatic resume.
+- **Names** come from `DISPLAY_NAME`, are sanitized and cut to 240 UTF-8 bytes (the file
+  system limit is 255 bytes). Duplicates get " (1)", compared case-insensitively so names
+  stay valid if copied to a case-insensitive file system later. The same URI picked twice
+  is copied once. `.part` is reserved for temp files.
+- **URI permissions.** The picker grant belongs to the Activity. The app takes a persistable
+  read grant when a batch starts and gives it back when the batch ends, so leaving the
+  screen does not break the copy. If a provider refuses, the file fails with "access was
+  lost".
 - **Only the latest batch is shown.** Older batches stay in the database and on disk.
-- **Single `:app` module and hand wiring** instead of multi-module and Hilt. The project is
-  small; the interfaces (`BackupStore`, `DocumentSource`, `BackupDestination`) are what make
-  the logic testable.
-- **Batches run one after another.** A second selection waits until the first batch is done.
-- **URI permissions.** The grant from the picker belongs to the Activity result and can go
-  away when the Activity finishes. Before the copy starts the app takes a persistable read
-  permission for every picked URI and releases it after the batch. Providers may refuse this,
-  then the copy still works while the Activity lives. A "Retry failed" feature would keep
-  the permissions instead of releasing them.
 
 ## Consciously not done
 
-- Encryption, chunking, upload: out of scope, the destination interface is the seam.
-- WorkManager or foreground service: the assignment does not require background execution.
-- Resume of partial copies: not required, the partial file is deleted and marked instead.
-- Batch history UI: only the latest batch is shown, the data for older ones is kept.
-- SHA-256 of copies: size check only, a hash would be the first thing to add for integrity.
-- Per-file progress bars: a "Copying" state with a spinner is enough for this scope.
-- Retry failed, cancel: nice to have, left out to keep the core small and reliable.
-- Settings, theme, custom icon: default Material 3 theme.
-- Room migrations: version 1 only. The schema is exported to `app/schemas/` so a migration test is possible later.
+- Encryption, chunking, upload: out of scope. They would be another `BackupDestination`.
+- WorkManager or a foreground service: background execution is out of scope.
+- Resume, SHA-256, progress bars, history screen, retry, cancel, clean-up of old batches:
+  kept out to keep the core small. Retry and SHA-256 would be the first to add.
 
 ## Privacy
 
-The app has no `INTERNET` permission. Copies live in app-private storage that other apps
-cannot read. File names and URIs are not written to logcat.
-
-## Production next steps
-
-1. SHA-256 while streaming, stored per item, verified before upload.
-2. A foreground service or WorkManager so large batches finish when the app is in the background.
-3. Keep the URI permissions and add a "Retry failed" action.
-4. Encrypting destination and chunked upload behind `BackupDestination`.
-5. Quota handling: check free space before starting and skip files over a limit.
-6. Clean up staged batches once they are uploaded.
+No `INTERNET` permission. `allowBackup` is off, so the staging area is not copied to Google
+backup. Copies live in app-private storage. Only exception types are logged, not messages
+that could contain a path.
 
 ## Tests
 
-`./gradlew testDebugUnitTest` runs 27 JVM tests, no emulator needed:
-
-- copy produces identical bytes and leaves no `.part` file, 0-byte file succeeds
-- size mismatch, unreadable source, lost permission, read error mid-stream, virtual document, no space vs write failed
-- one failing file does not stop the rest of the batch
-- a database failure mid-batch does not crash and leaves no file without a DONE row
-- two batches started quickly run one after the other
-- same URI picked twice is copied once, equal names get " (1)", unsafe names are sanitized, long names are cut by bytes,
-  a file named `foo.part` cannot clash with the temp file of `foo`
-- startup turns PENDING and COPYING into INTERRUPTED and deletes their `.part` and final files
-
-Manually verified on the emulator: a 13-byte text file, a 50 MB random binary and a 0-byte
-file picked together, all copied with matching MD5, batch shown again after force-stop.
-
-## Time spent
-
-About 3.5 hours including setup, tests and this README.
-
-Complete: everything in the required scope. Unfinished: nothing from the required scope.
-The nice-to-have items are listed above as not done.
-
-## AI assistance
-
-I used Claude Code throughout. It wrote most of the first draft of every file from the
-decisions I set: staging copy in app-private storage, the failure categories, the `.part`
-then rename rule, the naming rules and what to leave out. I then ran separate AI review
-passes as a strict reviewer and as a tester on the emulator, read the findings, decided
-which ones to fix and which to leave, and checked the fixes on the emulator myself.
-Examples of fixes from that review: a temp-file clash between `foo.part` and `foo`, an
-uncaught database error on a full disk, and file names that were too long in bytes for
-Cyrillic text. I have read every line and can explain and change any part.
+`./gradlew testDebugUnitTest` runs 29 JVM tests on real temp files: byte-equal copies with no
+`.part` left, every failure reason, one failure not stopping the batch, a database failure
+mid-batch, two batches not overlapping, name rules, startup clean-up, and URI grants given
+back. Checked on the emulator: a 50 MB file and a 0-byte file with matching MD5,
+duplicate names, a source deleted before copy, a kill mid-copy, rotation, a full disk.

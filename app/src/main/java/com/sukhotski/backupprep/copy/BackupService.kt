@@ -23,7 +23,7 @@ class BackupService(
     private val store: BackupStore,
     private val source: DocumentSource,
     private val copier: FileCopier,
-    private val destination: StagingDestination,
+    private val destination: BackupDestination,
     private val scope: CoroutineScope,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -37,7 +37,11 @@ class BackupService(
      * Unfinished items become INTERRUPTED and their files are removed, so a file on disk always means DONE.
      */
     suspend fun reconcile() {
-        store.interruptUnfinished().forEach { destination.discard(it.batchId, it.name) }
+        store.interruptUnfinished().forEach {
+            destination.discard(it.batchId, it.name)
+            // The finally block in runBatch never ran after a kill, so give the grant back here.
+            source.release(it.sourceUri)
+        }
     }
 
     fun start(uris: List<String>): Job = synchronized(this) {
@@ -50,10 +54,8 @@ class BackupService(
         }.also { last = it }
     }
 
-    suspend fun runBatch(uris: List<String>) {
+    private suspend fun runBatch(uris: List<String>) {
         val distinctUris = uris.distinct()
-        // Taking a persistable grant twice is a no-op, so direct callers (tests) get the same behaviour.
-        distinctUris.forEach(source::retain)
         try {
             val infos = distinctUris.map(source::describe)
             val names = FileNames.unique(infos.map { FileNames.sanitize(it.displayName) })
@@ -72,7 +74,11 @@ class BackupService(
             throw e
         } catch (e: Exception) {
             // The store failed, for example SQLite on a full disk. Record what we can instead of crashing the app.
-            runCatching { reconcile() }
+            try {
+                reconcile()
+            } catch (ignored: Exception) {
+                // Startup reconcile repairs it on the next launch.
+            }
         }
     }
 
