@@ -13,10 +13,10 @@ makes local copies of them. The last batch and the result of every file survive 
   from the decisions I set: staging copy in app-private storage, the failure categories,
   the `.part` then rename rule, the naming rules and what to leave out. I then ran separate
   AI review passes, as a strict reviewer and as a tester on the emulator, read the findings,
-  decided which ones to fix and which to leave, and checked the fixes. Examples of fixes
+  decided which ones to fix and which to leave, and checked the AI test results. Examples of fixes
   from that review: a temp file clash between `foo.part` and `foo`, an uncaught database
   error on a full disk, file names too long in bytes for Cyrillic text, and URI grants not
-  given back after a process kill. I have read every line and can explain and change any part.
+  given back after a process kill. I reviewed the code and can walk through any part of it.
 
 ## Build and run
 
