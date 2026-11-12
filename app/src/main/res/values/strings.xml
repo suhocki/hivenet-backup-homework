@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">Prepare for Backup</string>
+    <string name="select_files">Select files</string>
+    <string name="empty_hint">No batch yet. Select files to create local backup copies.</string>
+    <string name="batch_from">Batch from %1$s</string>
+    <string name="size_unknown">Unknown size</string>
+
+    <string name="status_pending">Pending</string>
+    <string name="status_copying">Copying…</string>
+    <string name="status_done">Copied</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_interrupted">Interrupted, the app was closed during the copy</string>
+
+    <string name="reason_source_unreadable">Source could not be read. It was deleted or access was lost.</string>
+    <string name="reason_no_space">Not enough storage space on the device.</string>
+    <string name="reason_write_failed">Writing the copy failed.</string>
+    <string name="reason_size_mismatch">Copied size does not match the size reported by the provider.</string>
+    <string name="reason_virtual_document">Virtual document (for example Google Docs). It has no file content to copy.</string>
+    <string name="reason_unexpected">Unexpected error.</string>
+
+    <string name="summary_copied">%1$d copied</string>
+    <string name="summary_failed">%1$d failed</string>
+    <string name="summary_interrupted">%1$d interrupted</string>
+    <string name="summary_pending">%1$d pending</string>
+    <string name="summary_copying">%1$d copying</string>
+</resources>
