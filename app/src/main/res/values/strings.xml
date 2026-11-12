@@ -9,7 +9,7 @@
     <string name="status_copying">Copying…</string>
     <string name="status_done">Copied</string>
     <string name="status_failed">Failed</string>
-    <string name="status_interrupted">Interrupted, the app was closed before this file was finished</string>
+    <string name="status_interrupted">Interrupted before this file was finished</string>
 
     <string name="reason_source_unreadable">Source could not be read. It may have been deleted or moved.</string>
     <string name="reason_permission_lost">Access to the file was lost. Pick it again to copy it.</string>

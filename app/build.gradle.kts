@@ -7,9 +7,7 @@ plugins {
 android {
     namespace = "com.sukhotski.backupprep"
     compileSdk {
-        version = release(36) {
-            minorApiLevel = 1
-        }
+        version = release(36)
     }
 
     defaultConfig {

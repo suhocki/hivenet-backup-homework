@@ -6,7 +6,7 @@ survive an app restart.
 
 ## Build and run
 
-Requirements: JDK 17 or newer, Android SDK with platform 36.1 installed. No global Gradle
+Requirements: JDK 17 or newer, Android SDK with platform 36 installed. No global Gradle
 is needed, the wrapper downloads Gradle 9.3.1.
 
 ```
@@ -17,7 +17,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Or open the folder in Android Studio and press Run.
 
 Tested on the Android Studio emulator "Medium Phone", Android 16 (API 36, arm64).
-minSdk is 26, compileSdk and targetSdk are 36 (36.1 minor release).
+minSdk is 26, compileSdk and targetSdk are 36.
 
 Stack: Kotlin 2.2, Jetpack Compose (Material 3), Room 2.8 with KSP, Kotlin coroutines.
 One module, no DI framework.
@@ -63,6 +63,8 @@ and can be picked again. Nothing is lost silently.
 
 - **Streaming copy** with a 256 KB buffer on `Dispatchers.IO`. Memory stays flat for large files.
 - **Write to `name.part`, fsync, then rename.** A final file name always means a complete copy.
+  The parent directory is not fsynced, so on power loss (not process death) a rename can be lost;
+  the startup cleanup then removes the orphaned `.part`.
 - **Size check.** If the provider reports `OpenableColumns.SIZE`, the copied byte count must
   match, otherwise the item fails with "size mismatch" and the partial file is deleted.
   If the size is unknown, the check is skipped.
@@ -101,7 +103,7 @@ and can be picked again. Nothing is lost silently.
 - Per-file progress bars: a "Copying" state with a spinner is enough for this scope.
 - Retry failed, cancel: nice to have, left out to keep the core small and reliable.
 - Settings, theme, custom icon: default Material 3 theme.
-- Room schema export, migrations: version 1 only.
+- Room migrations: version 1 only. The schema is exported to `app/schemas/` so a migration test is possible later.
 
 ## Privacy
 
@@ -119,14 +121,14 @@ cannot read. File names and URIs are not written to logcat.
 
 ## Tests
 
-`./gradlew testDebugUnitTest` runs 26 JVM tests, no emulator needed:
+`./gradlew testDebugUnitTest` runs 27 JVM tests, no emulator needed:
 
 - copy produces identical bytes and leaves no `.part` file, 0-byte file succeeds
 - size mismatch, unreadable source, lost permission, read error mid-stream, virtual document, no space vs write failed
 - one failing file does not stop the rest of the batch
 - a database failure mid-batch does not crash and leaves no file without a DONE row
 - two batches started quickly run one after the other
-- same URI picked twice is copied once, equal names get " (1)", unsafe names are sanitized,
+- same URI picked twice is copied once, equal names get " (1)", unsafe names are sanitized, long names are cut by bytes,
   a file named `foo.part` cannot clash with the temp file of `foo`
 - startup turns PENDING and COPYING into INTERRUPTED and deletes their `.part` and final files
 
@@ -142,6 +144,11 @@ The nice-to-have items are listed above as not done.
 
 ## AI assistance
 
-I used an AI coding assistant (Claude) for boilerplate, Gradle setup and a first version of
-the tests. I designed the architecture, the failure handling and the file naming rules, and
-reviewed every line. I can explain and modify any part of the code.
+I used Claude Code throughout. It wrote most of the first draft of every file from the
+decisions I set: staging copy in app-private storage, the failure categories, the `.part`
+then rename rule, the naming rules and what to leave out. I then ran separate AI review
+passes as a strict reviewer and as a tester on the emulator, read the findings, decided
+which ones to fix and which to leave, and checked the fixes on the emulator myself.
+Examples of fixes from that review: a temp-file clash between `foo.part` and `foo`, an
+uncaught database error on a full disk, and file names that were too long in bytes for
+Cyrillic text. I have read every line and can explain and change any part.

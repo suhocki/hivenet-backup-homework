@@ -23,8 +23,16 @@ class FileNamesTest {
     fun `sanitize keeps the extension when truncating`() {
         val long = "a".repeat(300) + ".pdf"
         val result = FileNames.sanitize(long)
-        assertEquals(200, result.length)
+        assertEquals(240, result.toByteArray().size)
         assertEquals(".pdf", result.takeLast(4))
+    }
+
+    @Test
+    fun `sanitize limits by bytes so long Cyrillic names still fit the file system`() {
+        val result = FileNames.sanitize("я".repeat(200) + ".pdf")
+        assert(result.toByteArray().size <= 240)
+        assertEquals(".pdf", result.takeLast(4))
+        assert((result + " (99).part").toByteArray().size <= 255)
     }
 
     @Test

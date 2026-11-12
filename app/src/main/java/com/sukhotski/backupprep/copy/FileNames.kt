@@ -1,7 +1,8 @@
 package com.sukhotski.backupprep.copy
 
 object FileNames {
-    private const val MAX_LENGTH = 200
+    /** Linux NAME_MAX is 255 bytes. Leave room for " (99)" and ".part". */
+    private const val MAX_BYTES = 240
     private const val FALLBACK = "file"
     private val illegalChars = Regex("""[\\/:*?"<>|\p{Cntrl}]""")
 
@@ -9,9 +10,11 @@ object FileNames {
     fun sanitize(displayName: String?): String {
         var cleaned = displayName.orEmpty().replace(illegalChars, "_").trim()
         if (cleaned.isEmpty() || cleaned == "." || cleaned == "..") return FALLBACK
-        if (cleaned.length > MAX_LENGTH) {
+        if (cleaned.utf8Size() > MAX_BYTES) {
             val (base, ext) = split(cleaned)
-            cleaned = base.take(MAX_LENGTH - ext.length) + ext
+            var cut = base
+            while (cut.isNotEmpty() && (cut + ext).utf8Size() > MAX_BYTES) cut = cut.dropLast(1)
+            cleaned = if (cut.isEmpty()) cleaned.take(MAX_BYTES / 4) else cut + ext
         }
         // ".part" is reserved for temp files, otherwise "foo.part" and "foo" in one batch would share a temp file.
         return if (cleaned.endsWith(StagingDestination.PART_SUFFIX, ignoreCase = true)) cleaned + "_" else cleaned
@@ -30,6 +33,8 @@ object FileNames {
             candidate
         }
     }
+
+    private fun String.utf8Size() = toByteArray(Charsets.UTF_8).size
 
     private fun split(name: String): Pair<String, String> {
         val dot = name.lastIndexOf('.')

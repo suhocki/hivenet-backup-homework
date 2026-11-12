@@ -41,6 +41,8 @@ class BackupService(
     }
 
     fun start(uris: List<String>): Job = synchronized(this) {
+        // Take the grant now, while the picker result is still valid, even if this batch has to wait in the queue.
+        uris.distinct().forEach(source::retain)
         val previous = last
         scope.launch(ioDispatcher) {
             previous.join()
@@ -50,7 +52,7 @@ class BackupService(
 
     suspend fun runBatch(uris: List<String>) {
         val distinctUris = uris.distinct()
-        // The picker grant belongs to the Activity result. Keep read access until the batch is over.
+        // Taking a persistable grant twice is a no-op, so direct callers (tests) get the same behaviour.
         distinctUris.forEach(source::retain)
         try {
             val infos = distinctUris.map(source::describe)

@@ -35,7 +35,7 @@ class FileCopier(
             return CopyResult.Failed(FailureReason.SOURCE_UNREADABLE)
         }
 
-        input.use {
+        try {
             val target = try {
                 destination.open(batchId, fileName)
             } catch (e: IOException) {
@@ -59,6 +59,9 @@ class FileCopier(
                 target.abort()
                 throw e
             }
+        } finally {
+            // A close error after commit must not turn a complete copy into a failure.
+            runCatching { input.close() }
         }
     }
 
