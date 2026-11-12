@@ -52,11 +52,10 @@ class StagingDestination(private val root: File) : BackupDestination {
         }
     }
 
-    /** Removes ".part" files that a killed process left behind in the given batch folders. */
-    fun deleteLeftoverParts(batchIds: List<Long>) {
-        batchIds.forEach { id ->
-            batchDir(id).listFiles { file -> file.name.endsWith(PART_SUFFIX) }?.forEach { it.delete() }
-        }
+    /** Removes what an interrupted item left behind: its partial file and, if it got that far, the final file. */
+    fun discard(batchId: Long, fileName: String) {
+        File(batchDir(batchId), fileName + PART_SUFFIX).delete()
+        File(batchDir(batchId), fileName).delete()
     }
 
     companion object {

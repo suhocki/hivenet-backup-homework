@@ -9,9 +9,10 @@
     <string name="status_copying">Copying…</string>
     <string name="status_done">Copied</string>
     <string name="status_failed">Failed</string>
-    <string name="status_interrupted">Interrupted, the app was closed during the copy</string>
+    <string name="status_interrupted">Interrupted, the app was closed before this file was finished</string>
 
-    <string name="reason_source_unreadable">Source could not be read. It was deleted or access was lost.</string>
+    <string name="reason_source_unreadable">Source could not be read. It may have been deleted or moved.</string>
+    <string name="reason_permission_lost">Access to the file was lost. Pick it again to copy it.</string>
     <string name="reason_no_space">Not enough storage space on the device.</string>
     <string name="reason_write_failed">Writing the copy failed.</string>
     <string name="reason_size_mismatch">Copied size does not match the size reported by the provider.</string>

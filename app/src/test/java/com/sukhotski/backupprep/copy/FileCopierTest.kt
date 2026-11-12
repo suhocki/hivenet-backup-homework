@@ -22,7 +22,8 @@ class FileCopierTest {
 
     private fun copier(doc: FakeDocument, destination: BackupDestination = this.destination): Pair<FileCopier, SourceInfo> {
         val source = FakeDocumentSource(mapOf("uri" to doc))
-        return FileCopier(source, destination, bufferSize = 1024) to source.describe("uri")
+        val copier = FileCopier(source, destination, bufferSize = 1024, isNoSpace = { it.message == "ENOSPC" })
+        return copier to source.describe("uri")
     }
 
     private fun batchFiles(): List<String> = destination.batchDir(batchId).listFiles()?.map { it.name }?.sorted().orEmpty()
@@ -73,9 +74,17 @@ class FileCopierTest {
 
     @Test
     fun `source that cannot be opened is reported as unreadable`() = runTest {
-        val (copier, info) = copier(FakeDocument(ByteArray(5), failOnOpen = true))
+        val (copier, info) = copier(FakeDocument(ByteArray(5), openError = IOException("source gone")))
 
         assertEquals(CopyResult.Failed(FailureReason.SOURCE_UNREADABLE), copier.copy(batchId, "uri", "x", info))
+        assertTrue(batchFiles().isEmpty())
+    }
+
+    @Test
+    fun `revoked uri permission is reported as permission lost`() = runTest {
+        val (copier, info) = copier(FakeDocument(ByteArray(5), openError = SecurityException("no grant")))
+
+        assertEquals(CopyResult.Failed(FailureReason.PERMISSION_LOST), copier.copy(batchId, "uri", "x", info))
         assertTrue(batchFiles().isEmpty())
     }
 
@@ -98,7 +107,7 @@ class FileCopierTest {
 
     @Test
     fun `write error with ENOSPC is reported as no space`() = runTest {
-        val failing = FailingDestination(destination, IOException("write failed: ENOSPC (No space left on device)"))
+        val failing = FailingDestination(destination, IOException("ENOSPC"))
         val (copier, info) = copier(FakeDocument(ByteArray(5)), failing)
 
         assertEquals(CopyResult.Failed(FailureReason.NO_SPACE), copier.copy(batchId, "uri", "x", info))

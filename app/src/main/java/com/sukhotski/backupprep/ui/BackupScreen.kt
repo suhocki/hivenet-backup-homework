@@ -105,6 +105,7 @@ private fun statusText(item: ItemEntity): String = when (item.status) {
 private fun reasonText(reason: FailureReason?): String = stringResource(
     when (reason) {
         FailureReason.SOURCE_UNREADABLE -> R.string.reason_source_unreadable
+        FailureReason.PERMISSION_LOST -> R.string.reason_permission_lost
         FailureReason.NO_SPACE -> R.string.reason_no_space
         FailureReason.WRITE_FAILED -> R.string.reason_write_failed
         FailureReason.SIZE_MISMATCH -> R.string.reason_size_mismatch
@@ -115,7 +116,7 @@ private fun reasonText(reason: FailureReason?): String = stringResource(
 
 @Composable
 private fun statusColor(status: ItemStatus): Color = when (status) {
-    ItemStatus.DONE -> Color(0xFF2E7D32)
+    ItemStatus.DONE -> MaterialTheme.colorScheme.primary
     ItemStatus.FAILED -> MaterialTheme.colorScheme.error
     ItemStatus.INTERRUPTED -> MaterialTheme.colorScheme.tertiary
     ItemStatus.PENDING, ItemStatus.COPYING -> MaterialTheme.colorScheme.onSurfaceVariant

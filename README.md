@@ -54,8 +54,10 @@ AppContainer                hand wiring, application scoped CoroutineScope
 ```
 
 The copy runs in an application-scoped coroutine, not in the ViewModel. The screen only
-observes the database through a `StateFlow`. Rotation or leaving the screen does not touch
-the running copy.
+observes the database through a `StateFlow`. Rotation does not touch the running copy.
+Leaving the screen does not either, as long as the provider lets the app keep the URI grant
+(see "URI permissions" below). If it does not, the remaining files fail with "access was lost"
+and can be picked again. Nothing is lost silently.
 
 ## Decisions
 
@@ -65,21 +67,29 @@ the running copy.
   match, otherwise the item fails with "size mismatch" and the partial file is deleted.
   If the size is unknown, the check is skipped.
 - **One failure does not stop the batch.** Each item ends as DONE or FAILED with a reason:
-  source unreadable or permission lost, no space, write failed, size mismatch, virtual document
-  (for example Google Docs, which has no byte stream), unexpected.
+  source unreadable, permission lost, no space, write failed, size mismatch, virtual document
+  (for example Google Docs, which has no byte stream), unexpected. A failure inside the
+  database itself (for example SQLite on a full disk) marks the batch interrupted instead of
+  crashing the app.
 - **Interrupted work is made visible.** On app start, items still PENDING or COPYING and
-  batches still RUNNING become INTERRUPTED, and leftover `.part` files of those batches are
-  deleted. There is no automatic resume.
+  batches still RUNNING become INTERRUPTED, and their files are deleted, both the `.part` file
+  and a final file that was renamed just before the process died. So a file on disk always
+  means DONE in the database. There is no automatic resume.
 - **Names.** Taken from `OpenableColumns.DISPLAY_NAME`, sanitized (path separators, control
   characters), with a fallback of "file". Two files with the same name in one batch become
-  `name.ext` and `name (1).ext`. The same URI picked twice is copied once.
+  `name.ext` and `name (1).ext`. The same URI picked twice is copied once. A name ending in
+  `.part` gets a `_` appended, because `.part` is reserved for temp files.
 - **0-byte files** are a normal success.
 - **Only the latest batch is shown.** Older batches stay in the database and on disk.
 - **Single `:app` module and hand wiring** instead of multi-module and Hilt. The project is
   small; the interfaces (`BackupStore`, `DocumentSource`, `BackupDestination`) are what make
   the logic testable.
-- **No persistable URI permission.** The copy runs right after picking, while the grant is
-  valid. A "Retry failed" feature would need `takePersistableUriPermission`.
+- **Batches run one after another.** A second selection waits until the first batch is done.
+- **URI permissions.** The grant from the picker belongs to the Activity result and can go
+  away when the Activity finishes. Before the copy starts the app takes a persistable read
+  permission for every picked URI and releases it after the batch. Providers may refuse this,
+  then the copy still works while the Activity lives. A "Retry failed" feature would keep
+  the permissions instead of releasing them.
 
 ## Consciously not done
 
@@ -102,20 +112,23 @@ cannot read. File names and URIs are not written to logcat.
 
 1. SHA-256 while streaming, stored per item, verified before upload.
 2. A foreground service or WorkManager so large batches finish when the app is in the background.
-3. Persistable URI permissions and a "Retry failed" action.
+3. Keep the URI permissions and add a "Retry failed" action.
 4. Encrypting destination and chunked upload behind `BackupDestination`.
 5. Quota handling: check free space before starting and skip files over a limit.
 6. Clean up staged batches once they are uploaded.
 
 ## Tests
 
-`./gradlew testDebugUnitTest` runs 20 JVM tests, no emulator needed:
+`./gradlew testDebugUnitTest` runs 26 JVM tests, no emulator needed:
 
 - copy produces identical bytes and leaves no `.part` file, 0-byte file succeeds
-- size mismatch, unreadable source, read error mid-stream, virtual document, no space vs write failed
+- size mismatch, unreadable source, lost permission, read error mid-stream, virtual document, no space vs write failed
 - one failing file does not stop the rest of the batch
-- same URI picked twice is copied once, equal names get " (1)", unsafe names are sanitized
-- startup turns PENDING and COPYING into INTERRUPTED and deletes leftover `.part` files
+- a database failure mid-batch does not crash and leaves no file without a DONE row
+- two batches started quickly run one after the other
+- same URI picked twice is copied once, equal names get " (1)", unsafe names are sanitized,
+  a file named `foo.part` cannot clash with the temp file of `foo`
+- startup turns PENDING and COPYING into INTERRUPTED and deletes their `.part` and final files
 
 Manually verified on the emulator: a 13-byte text file, a 50 MB random binary and a 0-byte
 file picked together, all copied with matching MD5, batch shown again after force-stop.

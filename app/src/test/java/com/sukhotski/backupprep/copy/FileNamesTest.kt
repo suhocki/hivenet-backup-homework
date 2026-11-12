@@ -28,6 +28,13 @@ class FileNamesTest {
     }
 
     @Test
+    fun `sanitize never returns a name that ends in part because that suffix is reserved for temp files`() {
+        assertEquals("foo.part_", FileNames.sanitize("foo.part"))
+        assertEquals("foo.PART_", FileNames.sanitize("foo.PART"))
+        assertEquals("foo.part.txt", FileNames.sanitize("foo.part.txt"))
+    }
+
+    @Test
     fun `unique adds a counter before the extension`() {
         val result = FileNames.unique(listOf("report.pdf", "report.pdf", "report.pdf", "notes"))
         assertEquals(listOf("report.pdf", "report (1).pdf", "report (2).pdf", "notes"), result)

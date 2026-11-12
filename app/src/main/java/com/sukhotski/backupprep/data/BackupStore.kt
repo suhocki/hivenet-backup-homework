@@ -18,9 +18,9 @@ interface BackupStore {
 
     /**
      * Marks RUNNING batches and PENDING/COPYING items as INTERRUPTED.
-     * Returns the ids of the batches that were still running.
+     * Returns the items that were still unfinished, so their files can be removed.
      */
-    suspend fun interruptUnfinished(): List<Long>
+    suspend fun interruptUnfinished(): List<ItemEntity>
 }
 
 class RoomBackupStore(private val db: BackupDatabase) : BackupStore {
@@ -43,10 +43,14 @@ class RoomBackupStore(private val db: BackupDatabase) : BackupStore {
 
     override suspend fun updateBatch(id: Long, status: BatchStatus) = dao.updateBatch(id, status)
 
-    override suspend fun interruptUnfinished(): List<Long> = db.withTransaction {
-        val running = dao.runningBatchIds()
-        dao.interruptUnfinishedItems()
-        dao.interruptRunningBatches()
-        running
+    override suspend fun interruptUnfinished(): List<ItemEntity> = db.withTransaction {
+        val unfinished = dao.itemsWithStatus(UNFINISHED)
+        dao.updateItemsWithStatus(UNFINISHED, ItemStatus.INTERRUPTED)
+        dao.updateBatchesWithStatus(BatchStatus.RUNNING, BatchStatus.INTERRUPTED)
+        unfinished
+    }
+
+    private companion object {
+        val UNFINISHED = listOf(ItemStatus.PENDING, ItemStatus.COPYING)
     }
 }

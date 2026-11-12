@@ -10,6 +10,8 @@ import com.sukhotski.backupprep.data.ItemStatus
 import com.sukhotski.backupprep.data.NewItem
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.yield
 import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
 import java.io.IOException
@@ -22,7 +24,8 @@ class FakeDocument(
     /** Size the provider reports. Defaults to the real size. */
     val reportedSize: Long? = bytes.size.toLong(),
     val isVirtual: Boolean = false,
-    val failOnOpen: Boolean = false,
+    /** Thrown by open(). IOException for a deleted source, SecurityException for a revoked grant. */
+    val openError: Exception? = null,
     /** Throw IOException after this many bytes were read. */
     val failReadAfter: Int? = null,
 )
@@ -38,7 +41,7 @@ class FakeDocumentSource(private val docs: Map<String, FakeDocument>) : Document
     override fun open(uri: String): InputStream {
         opened += uri
         val doc = docs[uri] ?: throw IOException("unknown uri")
-        if (doc.failOnOpen) throw IOException("source gone")
+        doc.openError?.let { throw it }
         val stream = ByteArrayInputStream(doc.bytes)
         val limit = doc.failReadAfter ?: return stream
         return object : FilterInputStream(stream) {
@@ -78,9 +81,10 @@ class InMemoryBackupStore : BackupStore {
         state.value = state.value + BatchWithItems(batch, items)
     }
 
-    override fun observeLatestBatch(): Flow<BatchWithItems?> = MutableStateFlow(state.value.lastOrNull())
+    override fun observeLatestBatch(): Flow<BatchWithItems?> = state.map { it.lastOrNull() }
 
     override suspend fun createBatch(items: List<NewItem>): BatchWithItems {
+        check(state.value.none { it.batch.status == BatchStatus.RUNNING }) { "a batch was created while another was running" }
         val batch = BatchEntity(id = nextBatchId++, createdAt = 0, status = BatchStatus.RUNNING)
         val entities = items.map {
             ItemEntity(id = nextItemId++, batchId = batch.id, sourceUri = it.sourceUri, name = it.name, expectedSize = it.expectedSize)
@@ -91,6 +95,7 @@ class InMemoryBackupStore : BackupStore {
     }
 
     override suspend fun updateItem(id: Long, status: ItemStatus, reason: FailureReason?, copiedBytes: Long) {
+        yield() // Room suspends here too. Lets tests see two batches interleave.
         state.value = state.value.map { b ->
             b.copy(items = b.items.map { if (it.id == id) it.copy(status = status, failureReason = reason, copiedBytes = copiedBytes) else it })
         }
@@ -100,8 +105,8 @@ class InMemoryBackupStore : BackupStore {
         state.value = state.value.map { if (it.batch.id == id) it.copy(batch = it.batch.copy(status = status)) else it }
     }
 
-    override suspend fun interruptUnfinished(): List<Long> {
-        val running = state.value.filter { it.batch.status == BatchStatus.RUNNING }.map { it.batch.id }
+    override suspend fun interruptUnfinished(): List<ItemEntity> {
+        val unfinished = state.value.flatMap { it.items }.filter { it.status == ItemStatus.PENDING || it.status == ItemStatus.COPYING }
         state.value = state.value.map { b ->
             val batch = if (b.batch.status == BatchStatus.RUNNING) b.batch.copy(status = BatchStatus.INTERRUPTED) else b.batch
             val items = b.items.map {
@@ -109,6 +114,16 @@ class InMemoryBackupStore : BackupStore {
             }
             BatchWithItems(batch, items)
         }
-        return running
+        return unfinished
+    }
+}
+
+/** Delegates everything, but the n-th updateItem call throws, like SQLite on a full disk. */
+class FailingOnceStore(private val delegate: BackupStore, private val failingCall: Int) : BackupStore by delegate {
+    private var calls = 0
+
+    override suspend fun updateItem(id: Long, status: ItemStatus, reason: FailureReason?, copiedBytes: Long) {
+        if (++calls == failingCall) throw IllegalStateException("database or disk is full")
+        delegate.updateItem(id, status, reason, copiedBytes)
     }
 }

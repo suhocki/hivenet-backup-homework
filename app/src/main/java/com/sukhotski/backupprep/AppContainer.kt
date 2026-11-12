@@ -1,6 +1,7 @@
 package com.sukhotski.backupprep
 
 import android.app.Application
+import android.util.Log
 import androidx.room.Room
 import com.sukhotski.backupprep.copy.BackupService
 import com.sukhotski.backupprep.copy.ContentResolverDocumentSource
@@ -8,6 +9,7 @@ import com.sukhotski.backupprep.copy.FileCopier
 import com.sukhotski.backupprep.copy.StagingDestination
 import com.sukhotski.backupprep.data.BackupDatabase
 import com.sukhotski.backupprep.data.RoomBackupStore
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -17,7 +19,7 @@ import java.io.File
 class AppContainer(app: Application) {
 
     /** Lives as long as the process, so a running copy survives rotation and screen changes. */
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + logUnhandled)
 
     private val database = Room.databaseBuilder(app, BackupDatabase::class.java, "backup.db").build()
 
@@ -32,4 +34,9 @@ class AppContainer(app: Application) {
         destination = destination,
         scope = appScope,
     )
+
+    private companion object {
+        /** Last line of defence: a bug in background work must not crash the app. No file names reach the log. */
+        val logUnhandled = CoroutineExceptionHandler { _, e -> Log.e("BackupApp", "Background work failed", e) }
+    }
 }

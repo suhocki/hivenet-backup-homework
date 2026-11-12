@@ -25,12 +25,12 @@ interface BackupDao {
     @Query("SELECT * FROM batches ORDER BY id DESC LIMIT 1")
     fun observeLatestBatch(): Flow<BatchWithItems?>
 
-    @Query("SELECT id FROM batches WHERE status = 'RUNNING'")
-    suspend fun runningBatchIds(): List<Long>
+    @Query("SELECT * FROM items WHERE status IN (:statuses)")
+    suspend fun itemsWithStatus(statuses: List<ItemStatus>): List<ItemEntity>
 
-    @Query("UPDATE items SET status = 'INTERRUPTED' WHERE status IN ('PENDING', 'COPYING')")
-    suspend fun interruptUnfinishedItems()
+    @Query("UPDATE items SET status = :to WHERE status IN (:from)")
+    suspend fun updateItemsWithStatus(from: List<ItemStatus>, to: ItemStatus)
 
-    @Query("UPDATE batches SET status = 'INTERRUPTED' WHERE status = 'RUNNING'")
-    suspend fun interruptRunningBatches()
+    @Query("UPDATE batches SET status = :to WHERE status = :from")
+    suspend fun updateBatchesWithStatus(from: BatchStatus, to: BatchStatus)
 }

@@ -27,34 +27,51 @@ class BackupService(
     private val scope: CoroutineScope,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
-    /** Startup cleanup runs first. A batch started right after launch waits for it. */
-    private val startup: Job = scope.launch(ioDispatcher) { reconcileOnStart() }
+    /** Batches run one after another. The chain starts with the startup cleanup. */
+    private var last: Job = scope.launch(ioDispatcher) { reconcile() }
 
     val latestBatch: Flow<BatchWithItems?> get() = store.observeLatestBatch()
 
     /**
-     * The process was killed or crashed while a batch was running.
-     * Items that never finished become INTERRUPTED and their partial files are removed.
+     * Makes the database and the disk agree after a kill, a crash or a failed store call.
+     * Unfinished items become INTERRUPTED and their files are removed, so a file on disk always means DONE.
      */
-    suspend fun reconcileOnStart() {
-        val interruptedBatches = store.interruptUnfinished()
-        destination.deleteLeftoverParts(interruptedBatches)
+    suspend fun reconcile() {
+        store.interruptUnfinished().forEach { destination.discard(it.batchId, it.name) }
     }
 
-    fun start(uris: List<String>): Job = scope.launch(ioDispatcher) {
-        startup.join()
-        runBatch(uris)
+    fun start(uris: List<String>): Job = synchronized(this) {
+        val previous = last
+        scope.launch(ioDispatcher) {
+            previous.join()
+            runBatch(uris)
+        }.also { last = it }
     }
 
     suspend fun runBatch(uris: List<String>) {
         val distinctUris = uris.distinct()
-        val infos = distinctUris.map(source::describe)
-        val names = FileNames.unique(infos.map { FileNames.sanitize(it.displayName) })
-        val newItems = distinctUris.indices.map { NewItem(distinctUris[it], names[it], infos[it].size) }
+        // The picker grant belongs to the Activity result. Keep read access until the batch is over.
+        distinctUris.forEach(source::retain)
+        try {
+            val infos = distinctUris.map(source::describe)
+            val names = FileNames.unique(infos.map { FileNames.sanitize(it.displayName) })
+            val newItems = distinctUris.indices.map { NewItem(distinctUris[it], names[it], infos[it].size) }
+            copyAll(store.createBatch(newItems), infos)
+        } finally {
+            distinctUris.forEach(source::release)
+        }
+    }
 
-        val batch = store.createBatch(newItems)
-        batch.items.zip(infos).forEach { (item, info) -> copyItem(item, info) }
-        store.updateBatch(batch.batch.id, BatchStatus.FINISHED)
+    private suspend fun copyAll(batch: BatchWithItems, infos: List<SourceInfo>) {
+        try {
+            batch.items.zip(infos).forEach { (item, info) -> copyItem(item, info) }
+            store.updateBatch(batch.batch.id, BatchStatus.FINISHED)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The store failed, for example SQLite on a full disk. Record what we can instead of crashing the app.
+            runCatching { reconcile() }
+        }
     }
 
     private suspend fun copyItem(item: ItemEntity, info: SourceInfo) {

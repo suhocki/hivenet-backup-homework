@@ -1,5 +1,7 @@
 package com.sukhotski.backupprep.copy
 
+import android.system.ErrnoException
+import android.system.OsConstants
 import com.sukhotski.backupprep.data.FailureReason
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -17,6 +19,8 @@ class FileCopier(
     private val source: DocumentSource,
     private val destination: BackupDestination,
     private val bufferSize: Int = 256 * 1024,
+    /** Tells a full disk apart from other write errors. Injectable because the default needs Android classes. */
+    private val isNoSpace: (IOException) -> Boolean = ::isNoSpaceOnAndroid,
 ) {
 
     suspend fun copy(batchId: Long, uri: String, fileName: String, info: SourceInfo): CopyResult {
@@ -24,8 +28,10 @@ class FileCopier(
 
         val input = try {
             source.open(uri)
+        } catch (e: SecurityException) {
+            return CopyResult.Failed(FailureReason.PERMISSION_LOST)
         } catch (e: Exception) {
-            // FileNotFoundException, SecurityException (grant revoked), IllegalArgumentException (bad uri)
+            // FileNotFoundException (source deleted), IllegalArgumentException (bad uri)
             return CopyResult.Failed(FailureReason.SOURCE_UNREADABLE)
         }
 
@@ -73,11 +79,12 @@ class FileCopier(
         }
     }
 
-    private fun classifyWriteFailure(e: IOException): FailureReason {
-        val message = e.message.orEmpty()
-        val noSpace = message.contains("ENOSPC") || message.contains("No space left", ignoreCase = true)
-        return if (noSpace) FailureReason.NO_SPACE else FailureReason.WRITE_FAILED
-    }
+    private fun classifyWriteFailure(e: IOException): FailureReason =
+        if (isNoSpace(e)) FailureReason.NO_SPACE else FailureReason.WRITE_FAILED
 
     private class SourceReadException(cause: IOException) : Exception(cause)
 }
+
+/** Android wraps a full disk as an ErrnoException(ENOSPC) somewhere in the cause chain of the IOException. */
+private fun isNoSpaceOnAndroid(e: IOException): Boolean =
+    generateSequence<Throwable>(e) { it.cause }.any { it is ErrnoException && it.errno == OsConstants.ENOSPC }

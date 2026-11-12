@@ -13,6 +13,7 @@ enum class ItemStatus { PENDING, COPYING, DONE, FAILED, INTERRUPTED }
 
 enum class FailureReason {
     SOURCE_UNREADABLE,
+    PERMISSION_LOST,
     NO_SPACE,
     WRITE_FAILED,
     SIZE_MISMATCH,

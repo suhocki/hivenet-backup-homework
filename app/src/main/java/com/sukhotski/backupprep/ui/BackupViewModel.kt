@@ -11,6 +11,7 @@ import com.sukhotski.backupprep.BackupApp
 import com.sukhotski.backupprep.copy.BackupService
 import com.sukhotski.backupprep.data.BatchStatus
 import com.sukhotski.backupprep.data.BatchWithItems
+import com.sukhotski.backupprep.data.ItemEntity
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -27,7 +28,7 @@ data class BackupUiState(
 class BackupViewModel(private val service: BackupService) : ViewModel() {
 
     val state: StateFlow<BackupUiState> = service.latestBatch
-        .map { BackupUiState(batch = it) }
+        .map { BackupUiState(batch = it?.copy(items = it.items.sortedBy(ItemEntity::id))) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BackupUiState(isLoading = true))
 
     fun onFilesPicked(uris: List<Uri>) {

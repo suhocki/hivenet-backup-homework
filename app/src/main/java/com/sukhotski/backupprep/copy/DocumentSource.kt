@@ -1,6 +1,7 @@
 package com.sukhotski.backupprep.copy
 
 import android.content.ContentResolver
+import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -24,6 +25,11 @@ interface DocumentSource {
 
     /** @throws java.io.IOException or SecurityException when the source cannot be opened. */
     fun open(uri: String): InputStream
+
+    /** Keeps read access beyond the picker result. Best effort: providers may refuse. */
+    fun retain(uri: String) {}
+
+    fun release(uri: String) {}
 }
 
 class ContentResolverDocumentSource(private val resolver: ContentResolver) : DocumentSource {
@@ -44,6 +50,14 @@ class ContentResolverDocumentSource(private val resolver: ContentResolver) : Doc
 
     override fun open(uri: String): InputStream =
         resolver.openInputStream(Uri.parse(uri)) ?: throw FileNotFoundException("Provider returned no stream")
+
+    override fun retain(uri: String) {
+        runCatching { resolver.takePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+    }
+
+    override fun release(uri: String) {
+        runCatching { resolver.releasePersistableUriPermission(Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+    }
 
     private fun query(uri: Uri, projection: Array<String>): Cursor? =
         try {
